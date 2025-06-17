@@ -83,11 +83,19 @@ def user_processing():
         )
         # fmt: on
 
-    fake_user = is_api_availible()
-    user_info = extract_user(fake_user)
-    process_user(user_info)
-    store_user()
+    # process_user(extract_user(create_table >> is_api_availible())) >> store_user()
+
+    # create_table >> is_api_availible >> extract_user >> process_user >> store_user
+
+    create_table >> [is_api_availible(), extract_user(), process_user()] >> store_user()
 
 
 # need to call or else you wont' see it on airflow UI
 user_processing()
+
+# example of dependency order
+# task_a >> [task_b, task_c, task_d] >> task_e
+# can also do << but why would you...
+
+# task_a >> task_b
+# task_b >> task_c, sometimes this is better with multiple tasks

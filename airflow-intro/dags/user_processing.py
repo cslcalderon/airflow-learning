@@ -7,6 +7,9 @@ from airflow.sdk.bases.sensor import PokeReturnValue
 # extract data with python
 from airflow.providers.standard.operators.python import PythonOperator
 
+# postgres hook
+from airflow.providers.postgres.hooks.postgres import PostgresHook
+
 
 @dag
 def user_processing():
@@ -53,6 +56,7 @@ def user_processing():
     @task
     def process_user(user_info):
         import csv
+        from datetime import datetime
 
         # to simulate run, made user variable
         user_info = {
@@ -62,14 +66,27 @@ def user_processing():
             "email": "cslcalderon@gmail.com",
         }
 
+        user_info["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         with open("/tmp/user_info.csv", "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=user_info.keys())
             writer.writeheader()
             writer.writerow(user_info)
 
+    @task
+    def store_user():
+        hook = PostgresHook(postgres_conn_id="postgres")
+        # fmt: off
+        hook.copy_expert(
+            sql="copy users from stdin with csv header", 
+            filename="/tmp/user_info.csv"
+        )
+        # fmt: on
+
     fake_user = is_api_availible()
     user_info = extract_user(fake_user)
     process_user(user_info)
+    store_user()
 
 
 # need to call or else you wont' see it on airflow UI

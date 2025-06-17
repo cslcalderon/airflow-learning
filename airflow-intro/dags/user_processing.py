@@ -50,8 +50,26 @@ def user_processing():
             "email": fake_user["personalInfo"]["email"],
         }
 
+    @task
+    def process_user(user_info):
+        import csv
+
+        # to simulate run, made user variable
+        user_info = {
+            "id": 1234,
+            "firstname": "Sofia",
+            "lastname": "Calderon",
+            "email": "cslcalderon@gmail.com",
+        }
+
+        with open("/tmp/user_info.csv", "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=user_info.keys())
+            writer.writeheader()
+            writer.writerow(user_info)
+
     fake_user = is_api_availible()
     user_info = extract_user(fake_user)
+    process_user(user_info)
 
 
 # need to call or else you wont' see it on airflow UI

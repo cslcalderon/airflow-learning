@@ -43,15 +43,6 @@ def user_processing():
 
     @task
     def extract_user(fake_user):
-        # takes in task instance to fetch data, ti is reserved keyword in airflow
-        # xcom is lightweight way to pass small vits of data from one task to another
-        # fake_user = ti.xcom_pull(task_ids="is_api_availible")  # from metadatabase
-        # import requests
-
-        # response = requests.get(
-        #     "https://raw.githubusercontent.com/marclamberti/datasets/refs/heads/main/fakeuser.json"
-        # )
-        # fake_user = response.json()
         return {
             "id": fake_user["id"],
             "firstname": fake_user["personalInfo"]["firstName"],
@@ -59,10 +50,6 @@ def user_processing():
             "email": fake_user["personalInfo"]["email"],
         }
 
-    # without python operator
-    # extract_user = PythonOperator(task_id="extract_user", python_callable=_extract_user)
-
-    # cleaner version
     fake_user = is_api_availible()
     user_info = extract_user(fake_user)
 

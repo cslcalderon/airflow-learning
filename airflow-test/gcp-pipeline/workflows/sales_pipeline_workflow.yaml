@@ -1,0 +1,234 @@
+# Cloud Workflows YAML - Orchestrates the entire pipeline
+# This replaces Airflow DAG orchestration and runs within free tier
+# 
+# Cloud Workflows free tier: 5,000 internal steps per month
+# Perfect for small to medium pipelines
+#
+# Benefits over Airflow:
+# - No infrastructure management 
+# - Built-in error handling and retries
+# - Visual execution tracking in console
+# - Cheap/free for most use cases
+
+main:
+  params: [input]
+  steps:
+    - init:
+        assign:
+          - project_id: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - execution_date: ${default(map.get(input, "execution_date"), text.split(time.format(sys.now()), "T")[0])}
+          - pipeline_start_time: ${sys.now()}
+          
+    - log_start:
+        call: sys.log
+        args:
+          data: ${"Starting sales pipeline for date: " + execution_date}
+          severity: INFO
+          
+    # Step 1: Extract sales data
+    # Calls Cloud Function to extract and load raw data
+    - extract_sales_data:
+        call: http.post
+        args:
+          url: https://REGION-PROJECT_ID.cloudfunctions.net/extract-sales-data
+          headers:
+            Content-Type: "application/json"
+          body:
+            execution_date: ${execution_date}
+          timeout: 300  # 5 minutes timeout
+        result: extract_result
+        
+    - check_extract_success:
+        switch:
+          - condition: ${extract_result.body.status == "error"}
+            next: handle_extract_error
+        next: log_extract_success
+        
+    - handle_extract_error:
+        call: sys.log
+        args:
+          data: ${"Extract failed: " + extract_result.body.error}
+          severity: ERROR
+        next: send_failure_notification
+        
+    - log_extract_success:
+        call: sys.log
+        args:
+          data: ${"Successfully extracted " + string(extract_result.body.records_processed) + " records"}
+          severity: INFO
+          
+    # Step 2: Transform sales data
+    # Calls Cloud Function to transform data in BigQuery
+    - transform_sales_data:
+        call: http.post
+        args:
+          url: https://REGION-PROJECT_ID.cloudfunctions.net/transform-sales-data
+          headers:
+            Content-Type: "application/json"
+          body:
+            execution_date: ${execution_date}
+          timeout: 600  # 10 minutes timeout for data processing
+        result: transform_result
+        
+    - check_transform_success:
+        switch:
+          - condition: ${transform_result.body.status == "error"}
+            next: handle_transform_error
+        next: log_transform_success
+        
+    - handle_transform_error:
+        call: sys.log
+        args:
+          data: ${"Transform failed: " + transform_result.body.error}
+          severity: ERROR
+        next: send_failure_notification
+        
+    - log_transform_success:
+        call: sys.log
+        args:
+          data: ${"Successfully transformed " + string(transform_result.body.transformed_records) + " records"}
+          severity: INFO
+          
+    # Step 3: Generate business reports
+    # Uses BigQuery to create summary reports
+    - generate_reports:
+        call: http.post
+        args:
+          url: https://REGION-PROJECT_ID.cloudfunctions.net/generate-reports
+          headers:
+            Content-Type: "application/json"
+          body:
+            execution_date: ${execution_date}
+            total_revenue: ${transform_result.body.total_revenue}
+          timeout: 300
+        result: report_result
+        
+    - check_report_success:
+        switch:
+          - condition: ${report_result.body.status == "error"}
+            next: handle_report_error
+        next: log_report_success
+        
+    - handle_report_error:
+        call: sys.log
+        args:
+          data: ${"Report generation failed: " + report_result.body.error}
+          severity: ERROR
+        next: send_failure_notification
+        
+    - log_report_success:
+        call: sys.log
+        args:
+          data: "Reports generated successfully"
+          severity: INFO
+          
+    # Step 4: Data quality validation
+    # Final validation step before considering pipeline complete
+    - validate_data_quality:
+        call: http.post
+        args:
+          url: https://REGION-PROJECT_ID.cloudfunctions.net/validate-data-quality
+          headers:
+            Content-Type: "application/json"
+          body:
+            execution_date: ${execution_date}
+          timeout: 180
+        result: validation_result
+        
+    - check_validation_success:
+        switch:
+          - condition: ${validation_result.body.status == "error"}
+            next: handle_validation_error
+        next: pipeline_success
+        
+    - handle_validation_error:
+        call: sys.log
+        args:
+          data: ${"Data validation failed: " + validation_result.body.error}
+          severity: ERROR
+        next: send_failure_notification
+          
+    # Success path - pipeline completed successfully
+    - pipeline_success:
+        assign:
+          - pipeline_end_time: ${sys.now()}
+          - execution_duration: ${pipeline_end_time - pipeline_start_time}
+          
+    - log_pipeline_success:
+        call: sys.log
+        args:
+          data: ${"Pipeline completed successfully in " + string(execution_duration) + " seconds"}
+          severity: INFO
+          
+    - send_success_notification:
+        call: http.post
+        args:
+          url: https://REGION-PROJECT_ID.cloudfunctions.net/send-notification
+          headers:
+            Content-Type: "application/json"
+          body:
+            status: "success"
+            execution_date: ${execution_date}
+            records_processed: ${extract_result.body.records_processed}
+            total_revenue: ${transform_result.body.total_revenue}
+            execution_duration: ${execution_duration}
+        result: notification_result
+        
+    - return_success:
+        return:
+          status: "success"
+          execution_date: ${execution_date}
+          records_processed: ${extract_result.body.records_processed}
+          total_revenue: ${transform_result.body.total_revenue}
+          execution_duration: ${execution_duration}
+          message: "Sales pipeline completed successfully"
+          
+    # Failure handling - called when any step fails
+    - send_failure_notification:
+        call: http.post
+        args:
+          url: https://REGION-PROJECT_ID.cloudfunctions.net/send-notification
+          headers:
+            Content-Type: "application/json"
+          body:
+            status: "failure"
+            execution_date: ${execution_date}
+            error_step: ${sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID")}
+        result: failure_notification_result
+        
+    - return_failure:
+        return:
+          status: "failure"
+          execution_date: ${execution_date}
+          message: "Sales pipeline failed - check logs for details"
+
+# Alternative simple workflow for learning/testing
+# Uncomment this section if you want a simpler version
+#
+# simple_pipeline:
+#   steps:
+#     - extract:
+#         call: http.get
+#         args:
+#           url: https://REGION-PROJECT_ID.cloudfunctions.net/extract-sales-data
+#         result: extract_result
+#     - transform:
+#         call: http.get  
+#         args:
+#           url: https://REGION-PROJECT_ID.cloudfunctions.net/transform-sales-data
+#         result: transform_result
+#     - return_result:
+#         return: ${transform_result}
+
+# Deployment notes:
+# 1. Replace REGION-PROJECT_ID with your actual values
+# 2. Deploy with: gcloud workflows deploy sales-pipeline --source=sales_pipeline_workflow.yaml
+# 3. Trigger with: gcloud workflows run sales-pipeline
+# 4. Schedule with Cloud Scheduler (3 jobs free per month)
+#
+# Cloud Scheduler command:
+# gcloud scheduler jobs create http sales-pipeline-daily \
+#   --schedule="0 6 * * *" \
+#   --uri="https://workflowexecutions.googleapis.com/v1/projects/PROJECT_ID/locations/REGION/workflows/sales-pipeline/executions" \
+#   --http-method=POST \
+#   --oauth-service-account-email=PROJECT_ID@appspot.gserviceaccount.com

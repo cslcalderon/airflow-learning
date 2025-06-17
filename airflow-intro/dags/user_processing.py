@@ -13,6 +13,12 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 @dag
 def user_processing():
+
+    # @task
+    # def reset_users_table():
+    #     hook = PostgresHook(postgres_conn_id="postgres")
+    #     hook.run("truncate table users")
+
     # making variable
     create_table = SQLExecuteQueryOperator(  # interacts with sql database
         task_id="create_table",  # what you see in airflow UI
@@ -58,14 +64,6 @@ def user_processing():
         import csv
         from datetime import datetime
 
-        # to simulate run, made user variable
-        user_info = {
-            "id": 1234,
-            "firstname": "Sofia",
-            "lastname": "Calderon",
-            "email": "cslcalderon@gmail.com",
-        }
-
         user_info["created_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         with open("/tmp/user_info.csv", "w", newline="") as f:
@@ -75,6 +73,8 @@ def user_processing():
 
     @task
     def store_user():
+        # if os.path.exists("/tmp/user_info.csv"):
+        #     os.remove("/tmp/user_info.csv")
         hook = PostgresHook(postgres_conn_id="postgres")
         # fmt: off
         hook.copy_expert(
@@ -83,11 +83,11 @@ def user_processing():
         )
         # fmt: on
 
-    # process_user(extract_user(create_table >> is_api_availible())) >> store_user()
-
-    # create_table >> is_api_availible >> extract_user >> process_user >> store_user
-
-    create_table >> [is_api_availible(), extract_user(), process_user()] >> store_user()
+    process_user(extract_user(create_table >> is_api_availible())) >> store_user()
+    # create_table >> is_api_availible
+    # is_api_availible >> extract_user
+    # extract_user >> process_user
+    # process_user >> store_user
 
 
 # need to call or else you wont' see it on airflow UI

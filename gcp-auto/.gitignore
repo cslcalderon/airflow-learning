@@ -1,2 +1,2 @@
 # Ignore service account keys
-gcp-auto/keys/*.json
+gcp-auto/keys/
